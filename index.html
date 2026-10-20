@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Round HK Island Swim</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #050b16; --glass: rgba(8, 18, 36, .86); --line: rgba(120, 170, 255, .22);
+    --text: #f2f6ff; --muted: #8ea6cc; --accent: #ffc83d; --cyan: #4fd1ff; --good: #2ee59d; --bad: #ff5c6c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; overflow: hidden; }
+  .mono { font-family: "JetBrains Mono", monospace; }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  .stage { position: relative; flex: 1; min-height: 0; }
+  #map { position: absolute; inset: 0; background: #0b1424; }
+
+  .panel { background: var(--glass); border: 1px solid var(--line); border-radius: 16px; backdrop-filter: blur(8px); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .cap { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+
+  /* ---- top route strip (in-flight style) ---- */
+  .strip { position: absolute; z-index: 500; top: 16px; left: 16px; right: 16px; padding: 14px 22px; display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center; }
+  .port .code { font-size: 34px; font-weight: 900; line-height: 1; }
+  .port .name { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .port.dst { text-align: right; }
+  .track { position: relative; height: 62px; }
+  .track .rail { position: absolute; left: 0; right: 0; top: 24px; border-top: 3px dashed rgba(143,166,204,.5); }
+  .track .done { position: absolute; left: 0; top: 23px; height: 5px; background: linear-gradient(90deg, var(--cyan), var(--accent)); border-radius: 3px; width: 0; transition: width .8s; }
+  .track .me { position: absolute; top: 6px; font-size: 34px; transform: translateX(-50%); transition: left .8s; filter: drop-shadow(0 0 8px rgba(255,200,61,.7)); }
+  .track .lbl { position: absolute; top: 44px; font-size: 13px; color: var(--muted); }
+  .track .lbl.l { left: 0; } .track .lbl.r { right: 0; }
+  .dir { position: absolute; top: -2px; left: 50%; transform: translateX(-50%); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); font-weight: 700; white-space: nowrap; }
+
+  /* ---- carousel ---- */
+  .carousel { position: absolute; z-index: 500; left: 16px; bottom: 16px; width: min(560px, 46vw); padding: 22px 26px 18px; overflow: hidden; }
+  .slides { position: relative; height: 150px; }
+  .slide { position: absolute; inset: 0; opacity: 0; transform: translateY(-12px); transition: opacity .3s, transform .3s; pointer-events: none; }
+  .slide.on { opacity: 1; transform: none; transition: opacity .45s .35s, transform .45s .35s; }
+  .slide .icon { position: absolute; right: 0; top: 0; font-size: 40px; opacity: .9; }
+  .slide .val { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: clamp(44px, 5.4vw, 76px); line-height: 1.05; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .slide .val small { font-size: .45em; color: var(--muted); margin-left: 6px; }
+  .slide .val.txt { font-family: Inter, sans-serif; font-weight: 900; font-size: clamp(34px, 4vw, 56px); }
+  .slide .sub { font-size: 18px; color: var(--muted); margin-top: 6px; }
+  .slide .sub b { color: var(--accent); }
+  .timer { height: 3px; background: rgba(255,255,255,.1); border-radius: 2px; margin-top: 12px; overflow: hidden; }
+  .timer div { height: 100%; width: 0; background: var(--cyan); }
+  .timer div.run { animation: fill var(--dur) linear forwards; }
+  @keyframes fill { to { width: 100%; } }
+  .dots { display: flex; gap: 6px; margin-top: 10px; }
+  .dots span { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.2); }
+  .dots span.on { background: var(--cyan); }
+
+  /* ---- pool panel ---- */
+  .pool { position: absolute; z-index: 500; right: 16px; bottom: 16px; width: min(440px, 40vw); padding: 18px 20px; }
+  .pool-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .pool-head .big { font-family: "JetBrains Mono", monospace; font-size: 40px; font-weight: 700; color: var(--accent); }
+  .lane { position: relative; height: 62px; margin: 12px 0 8px; border-radius: 8px; overflow: hidden;
+    background: linear-gradient(180deg, #0f6fb3, #0a5a95); border: 2px solid #cfe7ff55; }
+  .lane::before, .lane::after { content: ""; position: absolute; left: 0; right: 0; height: 5px;
+    background: repeating-linear-gradient(90deg, #ff3b3b 0 14px, #fff 14px 28px, #2a6bff 28px 42px, #fff 42px 56px); }
+  .lane::before { top: 0; } .lane::after { bottom: 0; }
+  .lane .mid { position: absolute; left: 50%; top: 5px; bottom: 5px; border-left: 2px dashed #ffffff40; }
+  .lane .tline { position: absolute; left: 8px; right: 8px; top: 50%; height: 4px; margin-top: -2px; background: #00203a80; }
+  .lane .wall { position: absolute; top: 5px; bottom: 5px; width: 6px; background: #cfe7ff; }
+  .lane .wall.a { left: 0; } .lane .wall.b { right: 0; }
+  .lane .swimmer { position: absolute; top: 50%; font-size: 30px; line-height: 1; transform: translate(-50%, -50%); }
+  .lane .swimmer span { display: inline-block; }
+  .lenbar { height: 8px; background: rgba(255,255,255,.1); border-radius: 4px; overflow: hidden; }
+  .lenbar div { height: 100%; width: 0; background: var(--good); border-radius: 4px; }
+  .lenline { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-top: 6px; }
+  .splits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .splits div { background: rgba(255,255,255,.05); border-radius: 10px; padding: 8px 10px; }
+  .splits .v small { font-size: .6em; color: var(--muted); margin-left: 3px; }
+  .splits .v { font-family: "JetBrains Mono", monospace; font-size: 22px; font-weight: 700; }
+
+  /* ---- controls dock ---- */
+  .dock { display: flex; gap: 10px; align-items: center; padding: 10px 16px; background: #08111f; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .dock.hidden { display: none; }
+  button, select { font: inherit; font-weight: 700; font-size: 15px; border-radius: 10px; border: 1px solid var(--line); background: #15233d; color: var(--text); padding: 10px 14px; cursor: pointer; }
+  button:hover, select:hover { filter: brightness(1.2); }
+  #lapBtn { font-size: 24px; font-weight: 900; padding: 12px 34px; background: var(--good); color: #052a1a; border: none; }
+  #startBtn.running { background: var(--bad); border-color: var(--bad); }
+  .dock .hint { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .showdock { position: absolute; z-index: 600; right: 16px; top: 180px; padding: 6px 10px; font-size: 12px; opacity: .5; }
+  .showdock:hover { opacity: 1; }
+
+  .pin { font-size: 26px; }
+  .sw { font-size: 34px; line-height: 1; filter: drop-shadow(0 0 8px rgba(255,200,61,.9)); }
+  .leaflet-tooltip.lbl { background: #000c; color: #fff; border: none; font-weight: 700; font-size: 14px; }
+  .leaflet-tooltip.lbl::before { display: none; }
+  .leaflet-control-layers { background: var(--glass); color: var(--text); border: 1px solid var(--line) !important; }
+  .leaflet-top.leaflet-right { top: 120px; }
+  .leaflet-top.leaflet-left { top: 120px; }
+
+  @media (max-width: 860px) {
+    html, body { overflow: auto; }
+    .app { height: auto; }
+    .stage { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; }
+    #map { position: relative; inset: auto; height: 50vh; border-radius: 12px; order: 1; }
+    .strip, .carousel, .pool { position: static; width: auto; }
+    .strip { order: 0; grid-template-columns: auto 1fr auto; gap: 12px; padding: 12px; }
+    .port .code { font-size: 24px; } .port .name { display: none; }
+    .carousel { order: 2; } .pool { order: 3; }
+    .leaflet-top.leaflet-right, .leaflet-top.leaflet-left { top: 0; }
+    .showdock { display: none; }
+    .dock .hint { display: none; }
+    #lapBtn { flex: 1 0 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <div id="map"></div>
+
+    <div class="strip panel">
+      <div class="port"><div class="code">SYP</div><div class="name">Sun Yat Sen Pool</div></div>
+      <div class="track">
+        <div class="dir" id="dirLbl">–</div>
+        <div class="rail"></div><div class="done" id="trackDone"></div>
+        <div class="me" id="trackMe">🏊</div>
+        <div class="lbl l mono" id="trackL">0 km</div><div class="lbl r mono" id="trackR">–</div>
+      </div>
+      <div class="port dst"><div class="code">VSA</div><div class="name">Wong Chuk Hang</div></div>
+    </div>
+
+    <div class="carousel panel">
+      <div class="slides" id="slides"></div>
+      <div class="timer"><div id="timerBar"></div></div>
+      <div class="dots" id="dots"></div>
+    </div>
+
+    <div class="pool panel">
+      <div class="pool-head">
+        <div><div class="cap">In the pool</div><div style="font-size:15px;color:var(--muted)" id="poolLbl">50 m lane</div></div>
+        <div class="big" id="lenCount">0</div>
+      </div>
+      <div class="lane">
+        <div class="tline"></div><div class="mid"></div>
+        <div class="wall a"></div><div class="wall b"></div>
+        <div class="swimmer" id="laneSwimmer"><span>🏊</span></div>
+      </div>
+      <div class="lenbar"><div id="lenBar"></div></div>
+      <div class="lenline"><span id="lenNow">Waiting to start</span><span id="lenEta"></span></div>
+      <div class="splits">
+        <div><div class="cap">Last</div><div class="v" id="spLast">–</div></div>
+        <div><div class="cap">Speed (last 5)</div><div class="v" id="spAvg">–</div></div>
+        <div><div class="cap">Best</div><div class="v" id="spBest">–</div></div>
+      </div>
+    </div>
+
+    <button class="showdock" id="showDock" title="Show/hide controls (H)">⚙︎ Controls</button>
+  </div>
+
+  <div class="dock" id="dock">
+    <button id="lapBtn">+1 LAP</button>
+    <button id="startBtn">▶ Start</button>
+    <button id="undoBtn">−1 lap</button>
+    <select id="routeSel" aria-label="Route direction">
+      <option value="east">Route: Eastbound (Central → Shek O → Stanley)</option>
+      <option value="west">Route: Westbound (Kennedy Town → Pok Fu Lam)</option>
+    </select>
+    <select id="poolLen" aria-label="Pool length">
+      <option value="50">Pool: 50 m</option>
+      <option value="25">Pool: 25 m</option>
+    </select>
+    <button id="unitBtn">Speed: m/s</button>
+    <select id="camSel" aria-label="Map camera">
+      <option value="auto">Camera: Auto</option>
+      <option value="overview">Camera: Whole route</option>
+      <option value="follow">Camera: Follow swimmer</option>
+    </select>
+    <button id="resetBtn">Reset</button>
+    <span class="hint">Space = +1 lap · Backspace = undo · S = start/pause · ←/→ = slides · U = m/s ↔ km/h · H = hide controls</span>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ===== Routes: [lat, lng, optional landmark]. Hand-traced ~100–300 m offshore; edit points to refine. =====
+const START = [22.2896, 114.1437, "Start: Sun Yat Sen Memorial Park Pool"];
+const FINISH = [22.2455, 114.1672, "Finish: VSA, Wong Chuk Hang"];
+const ROUTES = {
+  east: {
+    name: 'Eastbound', via: 'via Central · Shek O · Stanley',
+    pts: [
+      START,
+      [22.2915, 114.1450], [22.2918, 114.1490],
+      [22.2905, 114.1525, "Sheung Wan"], [22.2893, 114.1560],
+      [22.2885, 114.1600, "Central Piers"], [22.2870, 114.1650],
+      [22.2865, 114.1690, "Tamar / Admiralty"], [22.2872, 114.1735, "Convention Centre"],
+      [22.2855, 114.1790, "Wan Chai"], [22.2870, 114.1850, "Causeway Bay"],
+      [22.2905, 114.1925], [22.2935, 114.2000, "North Point"], [22.2920, 114.2080],
+      [22.2895, 114.2150, "Quarry Bay"], [22.2870, 114.2230, "Sai Wan Ho"],
+      [22.2835, 114.2330, "Lei Yue Mun"], [22.2790, 114.2410],
+      [22.2700, 114.2470, "Chai Wan"], [22.2600, 114.2560, "Cape Collinson"],
+      [22.2480, 114.2600, "Big Wave Bay"], [22.2330, 114.2630, "Shek O"],
+      [22.2180, 114.2620], [22.2060, 114.2590, "Cape D'Aguilar"], [22.2010, 114.2480],
+      [22.2050, 114.2330, "Tai Tam Bay"], [22.2010, 114.2250], [22.1945, 114.2180],
+      [22.1925, 114.2140, "Stanley"], [22.2062, 114.2038],
+      [22.2085, 114.1995, "Chung Hom Kok"], [22.2115, 114.1954], [22.2195, 114.1954],
+      [22.2280, 114.1960, "Repulse Bay"], [22.2300, 114.1905, "Middle Island"],
+      [22.2315, 114.1800, "Deep Water Bay"], [22.2345, 114.1765],
+      [22.2300, 114.1720, "Ocean Park"], [22.2321, 114.1653], [22.2359, 114.1647],
+      [22.2410, 114.1650], [22.2433, 114.1653],
+      FINISH,
+    ],
+  },
+  west: {
+    name: 'Westbound', via: 'via Kennedy Town · Pok Fu Lam · Aberdeen',
+    pts: [
+      START,
+      [22.2915, 114.1430], [22.2898, 114.1360],
+      [22.2872, 114.1290, "Kennedy Town"], [22.2840, 114.1225],
+      [22.2785, 114.1175, "Mount Davis"], [22.2720, 114.1195],
+      [22.2660, 114.1245, "Sandy Bay"], [22.2600, 114.1268, "Cyberport"],
+      [22.2555, 114.1290, "Telegraph Bay"], [22.2505, 114.1330, "Waterfall Bay"],
+      [22.2478, 114.1385, "Wah Fu"], [22.2470, 114.1440, "Aberdeen Harbour"],
+      [22.2474, 114.1500], [22.2472, 114.1550, "Ap Lei Chau Bridge"],
+      [22.2462, 114.1600], [22.2445, 114.1635], [22.2433, 114.1653],
+      FINISH,
+    ],
+  },
+};
+
+// ===== geometry =====
+const ER = 6371000, rad = d => d * Math.PI / 180;
+function hav(a, b) {
+  const dLat = rad(b[0] - a[0]), dLng = rad(b[1] - a[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng/2)**2;
+  return 2 * ER * Math.asin(Math.sqrt(h));
+}
+let route; // { key, pts, cum, total }
+function makeRoute(key) {
+  const pts = ROUTES[key].pts, cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i-1] + hav(pts[i-1], pts[i]));
+  return { key, pts, cum, total: cum[cum.length - 1] };
+}
+function pointAt(d) {
+  const { pts, cum, total } = route;
+  d = Math.max(0, Math.min(total, d));
+  let i = 1; while (i < cum.length - 1 && cum[i] < d) i++;
+  const seg = cum[i] - cum[i-1], t = seg ? (d - cum[i-1]) / seg : 0;
+  const a = pts[i-1], b = pts[i];
+  return { latlng: [a[0] + (b[0]-a[0]) * t, a[1] + (b[1]-a[1]) * t], seg: i };
+}
+function pathUpTo(d) {
+  const p = pointAt(d), pts = route.pts.slice(0, p.seg).map(w => [w[0], w[1]]);
+  pts.push(p.latlng); return pts;
+}
+
+// ===== map =====
+const map = L.map('map', { zoomControl: true, attributionControl: true, zoomSnap: 0.25 });
+const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const flight = L.layerGroup([
+  L.tileLayer(esri + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: 'Tiles &copy; Esri' }),
+  L.tileLayer(esri + 'Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 }),
+]).addTo(map);
+const streets = L.tileLayer(esri + 'World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' });
+const satellite = L.tileLayer(esri + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' });
+L.control.layers({ 'Flight display': flight, 'Street map': streets, 'Satellite': satellite }, null, { position: 'topright' }).addTo(map);
+
+const routeLayer = L.layerGroup().addTo(map);
+let doneLine;
+const swimmer = L.marker(START, {
+  icon: L.divIcon({ className: 'sw', html: '🏊', iconSize: [36, 36], iconAnchor: [18, 18] }), zIndexOffset: 1000
+}).addTo(map);
+
+function drawRoute() {
+  routeLayer.clearLayers();
+  const full = route.pts.map(w => [w[0], w[1]]);
+  L.polyline(full, { color: '#4fd1ff', weight: 4, opacity: .6, dashArray: '8 10' }).addTo(routeLayer);
+  doneLine = L.polyline([], { color: '#ffc83d', weight: 7, opacity: .95 }).addTo(routeLayer);
+  route.pts.forEach((w, i) => {
+    if (!w[2]) return;
+    const end = i === 0 || i === route.pts.length - 1;
+    if (end) {
+      L.marker([w[0], w[1]], { icon: L.divIcon({ className: 'pin', html: i === 0 ? '🟢' : '🏁', iconSize: [28, 28], iconAnchor: [14, 14] }) })
+        .addTo(routeLayer).bindTooltip(i === 0 ? 'SYP Pool' : 'VSA', { permanent: true, direction: 'left', className: 'lbl', offset: [-12, 0] });
+    } else {
+      L.circleMarker([w[0], w[1]], { radius: 4, color: '#4fd1ff', fillColor: '#fff', fillOpacity: 1, weight: 2 })
+        .addTo(routeLayer).bindTooltip(w[2], { direction: 'top', className: 'lbl' });
+    }
+  });
+}
+
+// keep the route clear of the overlay panels
+function overviewPadding() {
+  if (innerWidth <= 860) return { padding: [20, 20] };
+  const strip = document.querySelector('.strip').offsetHeight + 30;
+  // panels sit in the bottom corners, so the route can dip between them
+  const bottom = Math.max(document.querySelector('.carousel').offsetHeight, document.querySelector('.pool').offsetHeight) * 0.45;
+  return { paddingTopLeft: [60, strip], paddingBottomRight: [60, bottom] };
+}
+let camShown = null;
+function camera(mode, force) {
+  if (mode === camShown && !force && mode === 'overview') return;
+  camShown = mode;
+  if (mode === 'overview') map.flyToBounds(L.latLngBounds(route.pts.map(w => [w[0], w[1]])), { ...overviewPadding(), duration: 1.6 });
+  else map.flyTo(swimmer.getLatLng(), 15, { duration: 1.6 });
+}
+
+// ===== state =====
+const KEY = 'hk-swim-tracker-v1';
+let S = { laps: 0, pool: 50, elapsed: 0, startedAt: null, lapTimes: [], route: 'east', cam: 'auto', unit: 'ms' };
+try { Object.assign(S, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
+if (!Array.isArray(S.lapTimes)) S.lapTimes = [];
+if (!ROUTES[S.route]) S.route = 'east';
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+
+const $ = id => document.getElementById(id);
+$('poolLen').value = String(S.pool);
+$('routeSel').value = S.route;
+$('camSel').value = S.cam;
+
+// ===== formatting =====
+const swum = () => S.laps * S.pool;
+const elapsedMs = () => S.elapsed + (S.startedAt ? Date.now() - S.startedAt : 0);
+const km = m => (m / 1000).toFixed(2);
+const fmtDist = m => m >= 1000 ? km(m) + ' km' : Math.round(m) + ' m';
+const pad = n => String(n).padStart(2, '0');
+function hms(ms) { const s = Math.floor(ms / 1000); return `${Math.floor(s/3600)}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`; }
+function ms2(ms) { const s = Math.round(ms / 1000); return `${Math.floor(s/60)}:${pad(s%60)}`; }
+function dur(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m/60)} h ${pad(m%60)} m`;
+}
+function splits() {
+  const t = S.lapTimes, out = [];
+  for (let i = 0; i < t.length; i++) out.push(t[i] - (i ? t[i-1] : 0));
+  return out;
+}
+// Speed = metres covered in the last 5 lengths ÷ time between those "+1 LAP" presses.
+// (The very first length is timed from the start.) Everything that moves or estimates uses this.
+const SPEED_N = 5;
+const recentSplits = () => splits().slice(-SPEED_N);
+function speedMps() {
+  const r = recentSplits(), t = r.reduce((a, b) => a + b, 0);
+  return r.length && t > 0 ? S.pool * r.length / (t / 1000) : null;
+}
+function msPerMetre() { const v = speedMps(); return v ? 1000 / v : null; }
+function fmtSpeed(mps, html = true) {
+  if (!mps) return '–';
+  const [n, u] = S.unit === 'kmh' ? [(mps * 3.6).toFixed(2), 'km/h'] : [mps.toFixed(2), 'm/s'];
+  return html ? `${n}<small>${u}</small>` : `${n} ${u}`;
+}
+
+// ===== carousel slides (in-flight style) =====
+const SLIDES = [
+  { icon: '🏊', cap: 'Distance swum', val: () => `${km(swum())}<small>km</small>`, sub: () => `${S.laps} lengths × ${S.pool} m` },
+  { icon: '🏁', cap: 'Distance to VSA', val: () => `${km(Math.max(0, route.total - swum()))}<small>km</small>`, sub: () => `of ${km(route.total)} km total · ${pct().toFixed(1)}% complete` },
+  { icon: '⏱️', cap: 'Time swimming', val: () => hms(elapsedMs()), sub: () => S.startedAt ? 'Clock running' : (elapsedMs() ? 'Clock paused' : 'Waiting for the start') },
+  { icon: '🌊', cap: 'Speed · last 5 lengths', val: () => fmtSpeed(speedMps()),
+    sub: () => { const r = msPerMetre(); return r ? `<b>${ms2(r * S.pool)}</b> per ${S.pool} m length` : 'Needs at least one length'; } },
+  { icon: '📍', cap: 'Next landmark', txt: true, val: () => next() ? next().name : 'Arrived!',
+    sub: () => { const n = next(); if (!n) return '🎉 Welcome to VSA'; const r = msPerMetre();
+      return `<b>${fmtDist(n.dist)}</b> ahead` + (r ? ` · about ${dur(n.dist * r)} at this pace` : ''); } },
+  { icon: '🕒', cap: 'Estimated time to VSA', val: () => { const r = msPerMetre(), left = route.total - swum();
+      return left <= 0 ? 'Arrived' : r ? dur(left * r) : '–'; }, sub: () => 'At the current average pace, swimming non-stop' },
+  { icon: '🧭', cap: 'Route', txt: true, val: () => ROUTES[route.key].name, sub: () => ROUTES[route.key].via },
+  { icon: '🌏', cap: 'Local time · Hong Kong', val: () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Hong_Kong', hour: '2-digit', minute: '2-digit' }),
+    sub: () => new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Hong_Kong', weekday: 'long', day: 'numeric', month: 'long' }) },
+];
+const SLIDE_MS = 7000;
+document.documentElement.style.setProperty('--dur', SLIDE_MS + 'ms');
+$('slides').innerHTML = SLIDES.map((s, i) => `<div class="slide" data-i="${i}"><div class="icon">${s.icon}</div><div class="cap">${s.cap}</div><div class="val${s.txt ? ' txt' : ''}"></div><div class="sub"></div></div>`).join('');
+$('dots').innerHTML = SLIDES.map(() => '<span></span>').join('');
+const slideEls = [...document.querySelectorAll('.slide')], dotEls = [...document.querySelectorAll('.dots span')];
+let slide = -1, slideTimer, cycles = 0;
+
+function showSlide(i) {
+  slide = (i + SLIDES.length) % SLIDES.length;
+  slideEls.forEach((el, k) => el.classList.toggle('on', k === slide));
+  dotEls.forEach((el, k) => el.classList.toggle('on', k === slide));
+  const bar = $('timerBar'); bar.classList.remove('run'); void bar.offsetWidth; bar.classList.add('run');
+  renderSlides();
+  clearTimeout(slideTimer); slideTimer = setTimeout(() => { cycles++; autoCamera(); showSlide(slide + 1); }, SLIDE_MS);
+}
+function renderSlides() {
+  SLIDES.forEach((s, k) => {
+    slideEls[k].querySelector('.val').innerHTML = s.val();
+    slideEls[k].querySelector('.sub').innerHTML = s.sub();
+  });
+}
+// airplane-style camera: alternate whole route and close-up every 3 slides
+function autoCamera() {
+  if (S.cam !== 'auto') return;
+  camera(Math.floor(cycles / 3) % 2 ? 'follow' : 'overview');
+}
+
+const pct = () => Math.min(100, swum() / route.total * 100);
+function next() {
+  const d = swum(), i = route.pts.findIndex((w, k) => w[2] && route.cum[k] > d);
+  return i < 0 ? null : { name: route.pts[i][2].replace(/^Finish: /, ''), dist: route.cum[i] - d };
+}
+
+// ===== live pace model =====
+// Splits faster than ~0.3 s/m (15 s per 50 m) are treated as double-taps and ignored.
+function paceMs() {                       // expected ms per length at the current speed
+  const v = speedMps();
+  return v ? S.pool / v * 1000 : S.pool * 1200; // default 1:00 per 50 m before the first length
+}
+function lenState() {                     // where the teacher is inside the current length
+  const last = S.lapTimes.length ? S.lapTimes[S.lapTimes.length - 1] : 0;
+  const inLen = Math.max(0, elapsedMs() - last), pace = paceMs();
+  const started = elapsedMs() > 0 || S.laps > 0;
+  const raw = started ? inLen / pace : 0;
+  return { inLen, pace, started, f: Math.min(0.98, raw), overdue: raw >= 0.98, goingRight: S.laps % 2 === 0 };
+}
+// live distance = confirmed lengths + estimated progress in the current length
+const liveDist = () => Math.min(route.total, swum() + lenState().f * S.pool);
+
+// ===== map marker animation =====
+let shownDist = 0, anim = null;
+function drawAt(d) { const p = pointAt(d); swimmer.setLatLng(p.latlng); doneLine.setLatLngs(pathUpTo(d)); }
+function animateTo(target) {
+  cancelAnimationFrame(anim);
+  const from = shownDist, t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / 700), e = 1 - (1 - k) ** 3;
+    shownDist = from + (target - from) * e; drawAt(shownDist);
+    if (camShown === 'follow') map.panTo(swimmer.getLatLng(), { animate: false });
+    anim = k < 1 ? requestAnimationFrame(step) : null;
+  };
+  anim = requestAnimationFrame(step);
+}
+
+// ===== render =====
+function render(animate = true) {
+  $('trackL').textContent = km(swum()) + ' km swum';
+  $('trackR').textContent = km(Math.max(0, route.total - swum())) + ' km to go';
+  $('dirLbl').textContent = `${ROUTES[route.key].name} · ${ROUTES[route.key].via}`;
+  $('poolLbl').textContent = `${S.pool} m lane · lengths swum`;
+  $('lenCount').textContent = S.laps;
+  $('startBtn').textContent = S.startedAt ? '⏸ Pause' : '▶ Start';
+  $('startBtn').classList.toggle('running', !!S.startedAt);
+  const sp = splits();
+  $('spLast').textContent = sp.length ? ms2(sp[sp.length - 1]) : '–';
+  $('spAvg').innerHTML = fmtSpeed(speedMps());
+  $('spBest').textContent = sp.length ? ms2(Math.min(...sp)) : '–';
+  $('unitBtn').textContent = S.unit === 'kmh' ? 'Speed: km/h' : 'Speed: m/s';
+  renderSlides(); tick();
+  const d = liveDist();
+  if (animate) animateTo(d); else { shownDist = d; drawAt(d); }
+}
+
+// real-time loop: pool lane, length bar, top strip and map marker all follow the same estimate
+let lastMapDraw = 0;
+function tick() {
+  const L = lenState(), x = L.goingRight ? L.f : 1 - L.f;
+  const sw = $('laneSwimmer');
+  sw.style.left = `calc(14px + ${x} * (100% - 28px))`;
+  sw.firstElementChild.style.transform = L.goingRight ? 'scaleX(-1)' : 'none';
+  // bar fills from the wall the teacher pushed off, so its edge sits under the swimmer
+  const bar = $('lenBar');
+  bar.style.width = (L.f * 100) + '%';
+  bar.style.marginLeft = L.goingRight ? '0' : ((1 - L.f) * 100) + '%';
+  $('lenNow').textContent = L.started
+    ? `Length ${S.laps + 1} · ${ms2(L.inLen)} · ≈ ${Math.round(L.f * S.pool)} m ${L.goingRight ? '→' : '←'}`
+    : 'Waiting to start';
+  $('lenEta').textContent = !L.started ? '' : L.overdue ? 'touching the wall…'
+    : `${ms2(L.pace)} / length · ${fmtSpeed(S.pool / L.pace * 1000, false)}`;
+
+  const d = liveDist(), p = d / route.total * 100;
+  $('trackDone').style.width = p + '%';
+  $('trackMe').style.left = p + '%';
+  const now = performance.now();
+  if (!anim && now - lastMapDraw > 200) {
+    lastMapDraw = now; shownDist = d; drawAt(d);
+    if (camShown === 'follow') map.panTo(swimmer.getLatLng(), { animate: false });
+  }
+}
+function loop() { tick(); requestAnimationFrame(loop); }
+
+// ===== controls =====
+function addLap(n) {
+  if (n > 0) {
+    if (!S.startedAt && S.laps === 0 && !S.elapsed) S.startedAt = Date.now(); // auto-start on first lap
+    S.lapTimes.push(elapsedMs()); S.laps++;
+  } else if (S.laps > 0) { S.lapTimes.pop(); S.laps--; }
+  save(); render();
+}
+function toggleTimer() {
+  if (S.startedAt) { S.elapsed += Date.now() - S.startedAt; S.startedAt = null; } else S.startedAt = Date.now();
+  save(); render(false);
+}
+function setRoute(key) {
+  S.route = key; save();
+  route = makeRoute(key); drawRoute(); render(false); camera('overview', true);
+}
+$('lapBtn').onclick = () => addLap(1);
+$('undoBtn').onclick = () => addLap(-1);
+$('startBtn').onclick = toggleTimer;
+$('resetBtn').onclick = () => {
+  if (!confirm('Reset laps and timer to zero?')) return;
+  S = { ...S, laps: 0, elapsed: 0, startedAt: null, lapTimes: [] }; save(); render();
+};
+$('poolLen').onchange = e => { S.pool = +e.target.value; save(); render(); };
+$('routeSel').onchange = e => setRoute(e.target.value);
+$('camSel').onchange = e => { S.cam = e.target.value; save(); camera(S.cam === 'follow' ? 'follow' : 'overview', true); };
+const toggleDock = () => { $('dock').classList.toggle('hidden'); setTimeout(() => map.invalidateSize(), 50); };
+$('showDock').onclick = toggleDock;
+function toggleUnit() { S.unit = S.unit === 'kmh' ? 'ms' : 'kmh'; save(); render(false); }
+$('unitBtn').onclick = toggleUnit;
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); addLap(1); }
+  else if (e.code === 'Backspace') { e.preventDefault(); addLap(-1); }
+  else if (e.code === 'KeyS') toggleTimer();
+  else if (e.code === 'KeyH') toggleDock();
+  else if (e.code === 'KeyU') toggleUnit();
+  else if (e.code === 'ArrowRight') showSlide(slide + 1);
+  else if (e.code === 'ArrowLeft') showSlide(slide - 1);
+});
+addEventListener('resize', () => camShown === 'overview' && camera('overview', true));
+
+// ===== boot =====
+route = makeRoute(S.route);
+drawRoute();
+map.fitBounds(L.latLngBounds(route.pts.map(w => [w[0], w[1]])), overviewPadding());
+camShown = 'overview';
+render(false);
+showSlide(0);
+loop();
+setInterval(renderSlides, 250);
+if (S.cam === 'follow') camera('follow', true);
+</script>
+</body>
+</html>
